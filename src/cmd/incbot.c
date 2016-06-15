@@ -35,12 +35,14 @@
 #include <stdlib.h>     // exit
 #include "cscript.h"    // eprintf, filev_probe, eprint, fshow_str_array,
                         // set_debug_fh, set_eprint_fh, sname
+#include <string.h>     // memcpy()
 // IWYU::END
 
 #include <incbot.h>
 
 const char *program_path;
 const char *program_name;
+char *program_realpath;
 
 size_t filec;               // Count of elements in filev
 char **filev;               // Non-option elements of argv
@@ -268,10 +270,45 @@ main(int argc, char **argv)
     }
 
     if (!have_id_table) {
-        rv = read_id_table_file(default_id_table);
-        if (rv != 0) {
-            exit(rv);
+        rv = access(default_id_table, R_OK);
+        if (rv == 0) {
+            rv = read_id_table_file(default_id_table);
+            if (rv != 0) {
+                exit(rv);
+            }
+            have_id_table = true;
         }
+    }
+
+    if (!have_id_table) {
+        program_realpath = realpath(program_path, NULL);
+        const char *cmd_sfx = "/src/cmd/incbot";
+        const char *tbl_sfx = "/src/table/id-table";
+        size_t len = strlen(program_realpath);
+        size_t off = len - strlen(cmd_sfx);
+
+        // fprintf(stderr, "program_realpath = [%s]\n", program_realpath);
+        // fprintf(stderr, "  + off=%zu = [%s]\n", off, program_realpath + off);
+
+        if (strcmp(program_realpath + off, cmd_sfx) == 0) {
+            char *tbl_path = guard_malloc(off + strlen(tbl_sfx) + 1);
+            memcpy(tbl_path, program_realpath, off);
+            memcpy(tbl_path + off, tbl_sfx, strlen(tbl_sfx) + 1);
+            fprintf(stderr, "tbl_path=[%s]\n", tbl_path);
+            rv = access(tbl_path, R_OK);
+            if (rv == 0) {
+                rv = read_id_table_file(tbl_path);
+                if (rv != 0) {
+                    exit(rv);
+                }
+                have_id_table = true;
+            }
+        }
+    }
+
+    if (!have_id_table) {
+        eprintf("Could not find identifier table.\n");
+        exit(2);
     }
 
     if (filec == 0) {
