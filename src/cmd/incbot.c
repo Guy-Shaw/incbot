@@ -294,7 +294,7 @@ main(int argc, char **argv)
             char *tbl_path = guard_malloc(off + strlen(tbl_sfx) + 1);
             memcpy(tbl_path, program_realpath, off);
             memcpy(tbl_path + off, tbl_sfx, strlen(tbl_sfx) + 1);
-            fprintf(stderr, "tbl_path=[%s]\n", tbl_path);
+            // fprintf(stderr, "tbl_path=[%s]\n", tbl_path);
             rv = access(tbl_path, R_OK);
             if (rv == 0) {
                 rv = read_id_table_file(tbl_path);
