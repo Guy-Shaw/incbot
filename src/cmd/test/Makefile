@@ -26,7 +26,7 @@ test:
 	ls -lh tmp/incbot.*
 	tail tmp/incbot.err
 	tail tmp/incbot.out
-	( cd .. && make incbot-iwyu )
+	@which iwyu > /dev/null 2>&1 || exit 0 ; ( cd .. && make incbot-iwyu )
 
 vtest:
 	if [ ! -e tmp ]; then  mkdir tmp ; fi
