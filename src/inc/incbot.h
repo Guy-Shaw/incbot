@@ -33,6 +33,6 @@ extern int  read_id_table_file(const char *path);
 extern int  read_id_tables(void);
 extern int  incbot_src_file(const char *fname);
 extern void show_includes(void);
-
+extern int  trace_identifier(const char *);
 
 #endif /* INCBOT_H */

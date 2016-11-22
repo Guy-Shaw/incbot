@@ -54,6 +54,8 @@ enum sym_type {
     TYPE_STRUCT   = 0x40,
 };
 
+#define TYPE_ALL (TYPE_UNKNOWN|TYPE_FUNCTION|TYPE_TYPEDEF|TYPE_KEYWORD|TYPE_CONSTANT|TYPE_VAR|TYPE_STRUCT)
+
 struct idinfo {
     size_t sym;
     int    type;
@@ -63,6 +65,7 @@ struct idinfo {
     size_t man_sect;
     size_t man_path;
     size_t declare;
+    bool   trace;
 };
 
 typedef struct idinfo idinfo_t;
@@ -200,7 +203,7 @@ annotate_type(int t)
     case TYPE_STRUCT:   return ("struct");
     case TYPE_TYPEDEF:  return ("type");
     case TYPE_VAR:      return ("var");
-    case TYPE_UNKNOWN:  return ("?");
+    case TYPE_UNKNOWN:  return ("unknown");
     }
 }
 
@@ -248,11 +251,45 @@ id_find_linear_search(const char *s, int type_mask)
     return (undef_idnr);
 }
 
+static void
+fshow_typemask(FILE *f, int type_mask)
+{
+    size_t tm;
+    size_t m;
+    size_t mcnt;
+
+    if (type_mask == 0) {
+        return;
+    }
+
+    tm = (size_t)type_mask;
+
+    mcnt = 0;
+    for (m = ~((size_t)-1 & ((size_t)-1 >> 1)) ; m != 0; m >>= 1) {
+        if ((tm & m) != 0) {
+            if (mcnt != 0) {
+                fputc('|', f);
+            }
+            else {
+                fputc('{', f);
+            }
+            // fprintf(f, ",m=%zu", m);
+            fputs(annotate_type((int)m), f);
+            ++mcnt;
+        }
+    }
+
+    if (mcnt != 0) {
+        fputc('}', f);
+    }
+}
+
 static index_t
 id_find(const char *s, int type_mask)
 {
     index_t symnr;
     index_t id_pos;
+    int t;
 
     symnr = dict_find(id_symtable, s);
     if (symnr == undef_symnr) {
@@ -260,8 +297,15 @@ id_find(const char *s, int type_mask)
     }
 
     id_pos = symnr - 1;
+    t = id_table[id_pos].type;
 
-    if ((id_table[id_pos].type & type_mask) == 0) {
+    if (id_table[id_pos].trace) {
+        fprintf(stderr, "id_find:\n  id=[%s]\n  type_mask=%x=", s, type_mask);
+        fshow_typemask(stderr, type_mask);
+        fprintf(stderr, "\n  type(%s)=%x=%s\n", s, t, annotate_type(t));
+    }
+
+    if ((t & type_mask) == 0) {
         return (undef_idnr);
     }
 
@@ -457,7 +501,7 @@ cf_getc(FILE *f, cf_t *cf, ccv_t *ccv)
     size_t pos;
     int rv;
 
-    while (1) {
+    while (true) {
         while (ccv->len == 0) {
             int c;
 
@@ -535,34 +579,73 @@ incbot_src_stream(FILE *f, const char *fname)
     ccv_t *ccv = ccv_new();
     cf_t *cf = cf_new(CC_CODE);
     size_t lnr;
+    size_t col;
     char idbuf[1024];
     int c;
+    bool in_preprocessor;
 
     lnr = 0;
+    col = 0;
+    in_preprocessor = false;
     while ((c = cf_getc(f, cf, ccv)) != EOF) {
         if (c == '\n') {
             ++lnr;
+            col = 0;
+            in_preprocessor = false;
+        }
+        else {
+            ++col;
+        }
+
+        if (col == 1 && c == '#') {
+            in_preprocessor = true;
         }
 
         if (is_identifier_start(c)) {
             size_t idnr;
             char *dstp;
-            int find_type = 0xFFFF;
+            int find_type = TYPE_ALL & ~TYPE_FUNCTION;
 
             dstp = idbuf;
             *dstp++ = c;
             while ((c = cf_getc(f, cf, ccv)) != EOF && is_identifier(c)) {
                 *dstp++ = c;
+                ++col;
             }
             *dstp = '\0';
             while (c != EOF && isspace(c)) {
                 c = cf_getc(f, cf, ccv);
+                ++col;
             }
             if (c == '(') {
                 find_type = TYPE_FUNCTION | TYPE_KEYWORD;
             }
             else if (is_identifier_start(c)) {
                 cf_ungetc(c, ccv);
+            }
+
+            // Do not look at the contents of an #incude directive
+            // A filename can be mistaken for an identifier
+            // @library{libcf} only handles suppression of comments,
+            // and string literals, and knows nothing about
+            // preprocessor directives.
+            //
+            if (in_preprocessor && strcmp(idbuf, "include") == 0) {
+                while ((c = cf_getc(f, cf, ccv)) != EOF && c != '\n') {
+                    ///
+                }
+
+                if (c == '\n') {
+                    ++lnr;
+                    col = 0;
+                    in_preprocessor = false;
+                }
+                else if (c == EOF) {
+                    break;
+                }
+                else {
+                    ++col;
+                }
             }
 
             idnr = id_find(idbuf, find_type);
@@ -637,32 +720,6 @@ incbot_src_file(const char *fname)
     return (err);
 }
 
-#if 0
-
-static char *table_fname[] = {
-    "/usr/local/lib/incbot/id-table",
-    NULL
-};
-
-int
-read_id_tables(void)
-{
-    size_t tbl;
-    const char *fname;
-    int err;
-
-    for (tbl = 0; (fname = table_fname[tbl]) != NULL; ++tbl) {
-        err = read_id_table_file(fname);
-        if (err) {
-            return (err);
-        }
-    }
-
-    return (0);
-}
-
-#endif /* 0 */
-
 int
 refcmp(const void *vref1, const void *vref2)
 {
@@ -725,4 +782,17 @@ read_config_file(const char *path)
     eprintf("read_config_file(%s):\n", path);
     eprintf("*** not implemented ***\n");
     exit(2);
+}
+
+int
+trace_identifier(const char *sym)
+{
+    index_t idnr;
+
+    idnr = id_find(sym, TYPE_ALL);
+    if (idnr == undef_idnr) {
+        return (ENOENT);
+    }
+    id_table[idnr].trace = true;
+    return (0);
 }

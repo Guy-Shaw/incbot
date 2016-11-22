@@ -62,6 +62,7 @@ static struct option long_options[] = {
     {"debug",          no_argument,       0,  'd'},
     {"conf",           required_argument, 0,  'c'},
     {"id-table",       required_argument, 0,  't'},
+    {"trace",          required_argument, 0,  'T'},
     {0, 0, 0, 0}
 };
 
@@ -74,6 +75,8 @@ static const char usage_text[] =
     "  --conf      <fname>  configuration file\n"
     "  --id-table  <fname>  load file containing descriptions of identifiers\n"
     "                       There can be any number of id-table files.\n"
+    "  --trace=<symbol>     Trace usage of the given symbol\n"
+    "                       There can be any number of --trace=symbol\n"
     ;
 
 static const char version_text[] =
@@ -157,6 +160,32 @@ incbot_all_files(size_t filec, char **filev)
     return (err);
 }
 
+
+// ========== Section: manage tracing of selected identifiers ==========
+
+static const char *trcv[64];
+static size_t ntrace;
+
+static void
+add_trace_identifiers(const char *id)
+{
+    trcv[ntrace] = id;
+    ++ntrace;
+}
+
+static void
+mark_all_traced_identifiers(void)
+{
+    size_t trcnr;
+
+    for (trcnr = 0; trcnr < ntrace; ++trcnr) {
+        trace_identifier(trcv[trcnr]);
+    }
+}
+
+// ==========
+
+
 int
 main(int argc, char **argv)
 {
@@ -168,6 +197,7 @@ main(int argc, char **argv)
     int rv;
     bool have_id_table = false;
 
+    ntrace = 0;
     set_eprint_fh();
     program_path = *argv;
     program_name = sname(program_path);
@@ -184,7 +214,8 @@ main(int argc, char **argv)
         }
 
         this_option_optind = optind ? optind : 1;
-        optc = getopt_long(argc, argv, "+hVdvpk:s:", long_options, &option_index);
+
+        optc = getopt_long(argc, argv, "+hVdvc:t:T:", long_options, &option_index);
         if (optc == -1) {
             break;
         }
@@ -218,6 +249,9 @@ main(int argc, char **argv)
             //  Here, it matters only that a table was mentioned,
             //  not whether it was read without errors.
             have_id_table = true;
+            break;
+        case 'T':
+            add_trace_identifiers(optarg);
             break;
         case '?':
             eprint(program_name);
@@ -311,6 +345,7 @@ main(int argc, char **argv)
         exit(2);
     }
 
+    mark_all_traced_identifiers();
     if (filec == 0) {
         char *filev_stdin[] = { "-" };
         rv = incbot_all_files(1, filev_stdin);
